@@ -51,9 +51,9 @@ jobs:
         run: |
           echo "RAM: $(( $(sysctl -n hw.memsize) / 1024 / 1024 )) MB, CPUs: $(sysctl -n hw.ncpu)"
           sed -i '' \
-            -e 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx2048M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=768m/' \
-            -e 's/^kotlin.daemon.jvmargs=.*/kotlin.daemon.jvmargs=-Xmx10240M/' \
-            -e 's/^kotlin.native.jvmArgs=.*/kotlin.native.jvmArgs=-Xmx10240M/' \
+            -e 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx1536M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=768m/' \
+            -e 's/^kotlin.daemon.jvmargs=.*/kotlin.daemon.jvmargs=-Xmx11264M/' \
+            -e 's/^kotlin.native.jvmArgs=.*/kotlin.native.jvmArgs=-Xmx11264M/' \
             gradle.properties
           cat gradle.properties
 
@@ -88,6 +88,11 @@ jobs:
           cp -R "$RUNNER_TEMP/engine/nuvio-engine-apple-${ver}/NuvioEngine.xcframework" \
                 ../nuvio-engine/platform/apple/
           ls ../nuvio-engine/platform/apple/NuvioEngine.xcframework
+
+      # Link the Kotlin/Native framework on its own first. Inside a plain xcodebuild
+      # run it competes with clang/swift for RAM and the release link OOMs.
+      - name: Pre-link Kotlin framework (Release, arm64)
+        run: ./gradlew --no-daemon --max-workers=1 :composeApp:linkReleaseFrameworkIosArm64
 
       - name: Build (device, unsigned)
         run: |
