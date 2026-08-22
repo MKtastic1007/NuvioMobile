@@ -28,8 +28,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive   # pulls MPVKit, which iosApp links as a local SPM package
+
+      # The repo has orphan gitlinks (libass-android, vendor/*) with no .gitmodules
+      # entries, so `submodules: recursive` aborts. iOS only needs MPVKit, which
+      # iosApp links as a local Swift package.
+      - name: Init MPVKit submodule
+        run: git submodule update --init --depth 1 MPVKit && ls MPVKit
 
       - uses: actions/setup-java@v4
         with:
