@@ -1,0 +1,117 @@
+name: iOS unsigned IPA
+
+# Builds Nuvio for a real device WITHOUT code signing and packages it as an .ipa.
+# Sideloadly re-signs it with your own Apple ID, so an unsigned IPA is exactly
+# what you want here.
+#
+# Run it from the Actions tab -> "iOS unsigned IPA" -> Run workflow.
+# Download the artifact when it finishes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      distribution:
+        description: "full (plugins + torrent engine) or appstore (stripped)"
+        type: choice
+        options: [full, appstore]
+        default: full
+      engine_version:
+        description: "nuvio-engine release tag used for the 'full' build"
+        default: "v0.1.1"
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      NUVIO_IOS_DISTRIBUTION: ${{ inputs.distribution }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # pulls MPVKit, which iosApp links as a local SPM package
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Select newest installed Xcode
+        run: |
+          xc=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xc"
+          xcodebuild -version
+
+      # The runner has ~7 GB of RAM; the repo defaults ask for 12-16 GB heaps.
+      - name: Tame Gradle/Kotlin memory
+        run: |
+          sed -i '' \
+            -e 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4096M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=1024m/' \
+            -e 's/^kotlin.daemon.jvmargs=.*/kotlin.daemon.jvmargs=-Xmx3072M/' \
+            -e 's/^kotlin.native.jvmArgs=.*/kotlin.native.jvmArgs=-Xmx4096M/' \
+            gradle.properties
+          cat gradle.properties
+
+      # The app normally learns its backend from https://api.nuvio.tv/.well-known/nuvio
+      # at runtime. Bake the same public discovery values in so the build is
+      # pre-pointed at the official server instead of shipping a blank config.
+      - name: Fetch official server discovery document
+        run: |
+          set -euo pipefail
+          curl -fsSL https://api.nuvio.tv/.well-known/nuvio -o "$RUNNER_TEMP/discovery.json"
+          backend=$(python3 -c 'import json,os;print(json.load(open(os.environ["RUNNER_TEMP"]+"/discovery.json"))["backend_url"])')
+          key=$(python3 -c 'import json,os;print(json.load(open(os.environ["RUNNER_TEMP"]+"/discovery.json"))["publishable_key"])')
+          printf 'NUVIO_SUPABASE_URL=%s
+NUVIO_SUPABASE_ANON_KEY=%s
+' "$backend" "$key" >> local.properties
+          echo "::add-mask::$key"
+          echo "backend_url = $backend"
+
+      # composeApp/build.gradle.kts expects ../nuvio-engine/platform/apple/NuvioEngine.xcframework
+      # (a sibling of the checkout) for the "full" flavour. Use the prebuilt release.
+      - name: Fetch Nuvio Engine xcframework
+        if: inputs.distribution == 'full'
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.engine_version }}"
+          ver="${tag#v}"
+          mkdir -p "$RUNNER_TEMP/engine" ../nuvio-engine/platform/apple
+          curl -fsSL -o "$RUNNER_TEMP/engine.zip" \
+            "https://github.com/NuvioMedia/nuvio-engine/releases/download/${tag}/nuvio-engine-apple-${ver}.zip"
+          unzip -q "$RUNNER_TEMP/engine.zip" -d "$RUNNER_TEMP/engine"
+          cp -R "$RUNNER_TEMP/engine/nuvio-engine-apple-${ver}/NuvioEngine.xcframework" \
+                ../nuvio-engine/platform/apple/
+          ls ../nuvio-engine/platform/apple/NuvioEngine.xcframework
+
+      - name: Build (device, unsigned)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios-device \
+            -skipPackagePluginValidation -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Package as .ipa
+        run: |
+          set -euo pipefail
+          app=$(find build/ios-device/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          echo "Packaging $app"
+          rm -rf payload && mkdir -p payload/Payload
+          cp -R "$app" payload/Payload/
+          (cd payload && zip -qry "../Nuvio-${{ inputs.distribution }}-unsigned.ipa" Payload)
+          ls -lh Nuvio-*.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nuvio-${{ inputs.distribution }}-unsigned-ipa
+          path: Nuvio-*.ipa
+          if-no-files-found: error
