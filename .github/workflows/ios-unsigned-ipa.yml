@@ -22,7 +22,7 @@ on:
 jobs:
   build:
     runs-on: macos-15-intel   # 14 GB RAM; the 7 GB arm64 runner OOMs the Kotlin/Native linker
-    timeout-minutes: 120
+    timeout-minutes: 300
     env:
       NUVIO_IOS_DISTRIBUTION: ${{ inputs.distribution }}
 
@@ -34,6 +34,16 @@ jobs:
       # iosApp links as a local Swift package.
       - name: Init MPVKit submodule
         run: git submodule update --init --depth 1 MPVKit && ls MPVKit
+
+      - name: Cache Kotlin/Native + Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.konan
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: kn-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties', '**/*.gradle.kts') }}
+          restore-keys: kn-${{ runner.os }}-
 
       - uses: actions/setup-java@v4
         with:
@@ -94,6 +104,13 @@ jobs:
       # nothing else competing for the runner's 14 GB.
       - name: Pre-link Kotlin framework (Release, arm64)
         run: ./gradlew --max-workers=1 :composeApp:linkReleaseFrameworkIosArm64
+
+      # The framework is linked now; a resident 11 GB daemon would only swap-thrash
+      # against Xcode's clang/swift. The remaining Gradle work is an up-to-date check.
+      - name: Shrink Gradle heap for the Xcode phase
+        run: |
+          ./gradlew --stop || true
+          sed -i '' -e 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx2048M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=768m/' gradle.properties
 
       - name: Build (device, unsigned)
         run: |
