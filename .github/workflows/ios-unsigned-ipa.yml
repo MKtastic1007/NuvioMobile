@@ -51,9 +51,9 @@ jobs:
         run: |
           echo "RAM: $(( $(sysctl -n hw.memsize) / 1024 / 1024 )) MB, CPUs: $(sysctl -n hw.ncpu)"
           sed -i '' \
-            -e 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx3072M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=1024m/' \
-            -e 's/^kotlin.daemon.jvmargs=.*/kotlin.daemon.jvmargs=-Xmx3072M/' \
-            -e 's/^kotlin.native.jvmArgs=.*/kotlin.native.jvmArgs=-Xmx9216M/' \
+            -e 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx2048M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=768m/' \
+            -e 's/^kotlin.daemon.jvmargs=.*/kotlin.daemon.jvmargs=-Xmx10240M/' \
+            -e 's/^kotlin.native.jvmArgs=.*/kotlin.native.jvmArgs=-Xmx10240M/' \
             gradle.properties
           cat gradle.properties
 
