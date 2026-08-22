@@ -61,9 +61,10 @@ jobs:
           curl -fsSL https://api.nuvio.tv/.well-known/nuvio -o "$RUNNER_TEMP/discovery.json"
           backend=$(python3 -c 'import json,os;print(json.load(open(os.environ["RUNNER_TEMP"]+"/discovery.json"))["backend_url"])')
           key=$(python3 -c 'import json,os;print(json.load(open(os.environ["RUNNER_TEMP"]+"/discovery.json"))["publishable_key"])')
-          printf 'NUVIO_SUPABASE_URL=%s
-NUVIO_SUPABASE_ANON_KEY=%s
-' "$backend" "$key" >> local.properties
+          {
+            echo "NUVIO_SUPABASE_URL=$backend"
+            echo "NUVIO_SUPABASE_ANON_KEY=$key"
+          } >> local.properties
           echo "::add-mask::$key"
           echo "backend_url = $backend"
 
