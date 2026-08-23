@@ -18,6 +18,11 @@ on:
       engine_version:
         description: "nuvio-engine release tag used for the 'full' build"
         default: "v0.1.1"
+      kotlin_build_type:
+        description: "Kotlin framework: debug links ~4x faster, release is optimized"
+        type: choice
+        options: [debug, release]
+        default: debug
 
 jobs:
   build:
@@ -25,6 +30,9 @@ jobs:
     timeout-minutes: 300
     env:
       NUVIO_IOS_DISTRIBUTION: ${{ inputs.distribution }}
+      # Decouples the Kotlin framework's build type from Xcode's -configuration, so the
+      # Swift/app side stays Release while the Kotlin link can skip the optimizer.
+      KOTLIN_FRAMEWORK_BUILD_TYPE: ${{ inputs.kotlin_build_type }}
 
     steps:
       - uses: actions/checkout@v4
@@ -102,8 +110,16 @@ jobs:
       # Link the Kotlin/Native framework on its own first: the K/N compiler runs
       # inside the Gradle daemon JVM, so it needs org.gradle.jvmargs to be large and
       # nothing else competing for the runner's 14 GB.
-      - name: Pre-link Kotlin framework (Release, arm64)
-        run: ./gradlew --max-workers=1 :composeApp:linkReleaseFrameworkIosArm64
+      - name: Pre-link Kotlin framework (arm64)
+        run: |
+          set -euo pipefail
+          case "${{ inputs.kotlin_build_type }}" in
+            debug)   task=':composeApp:linkDebugFrameworkIosArm64' ;;
+            release) task=':composeApp:linkReleaseFrameworkIosArm64' ;;
+            *) echo "unknown kotlin_build_type"; exit 1 ;;
+          esac
+          echo "Linking $task"
+          time ./gradlew --max-workers=1 "$task"
 
       - name: Build (device, unsigned)
         run: |
@@ -130,11 +146,11 @@ jobs:
           echo "Packaging $app"
           rm -rf payload && mkdir -p payload/Payload
           cp -R "$app" payload/Payload/
-          (cd payload && zip -qry "../Nuvio-${{ inputs.distribution }}-unsigned.ipa" Payload)
+          (cd payload && zip -qry "../Nuvio-${{ inputs.distribution }}-kt-${{ inputs.kotlin_build_type }}-unsigned.ipa" Payload)
           ls -lh Nuvio-*.ipa
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Nuvio-${{ inputs.distribution }}-unsigned-ipa
+          name: Nuvio-${{ inputs.distribution }}-kt-${{ inputs.kotlin_build_type }}-unsigned-ipa
           path: Nuvio-*.ipa
           if-no-files-found: error
