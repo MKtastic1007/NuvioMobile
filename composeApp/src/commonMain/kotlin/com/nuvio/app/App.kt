@@ -567,8 +567,15 @@ fun App(
 
         fun enterProfileGate(profiles: List<NuvioProfile>, syncOnEnter: Boolean) {
             if (profiles.isEmpty()) {
-                autoSkipProfileSelection = true
-                gateScreen = AppGateScreen.ProfileSelection.name
+                // Go straight into the app on a default profile rather than demanding the
+                // user create one. Profiles remain available from the switcher.
+                val default = ProfileRepository.ensureDefaultProfile()
+                ProfileRepository.selectProfile(default.profileIndex)
+                if (syncOnEnter) {
+                    SyncManager.pullAllForProfile(default.profileIndex)
+                }
+                gateScreen = AppGateScreen.Main.name
+                autoSkipProfileSelection = false
                 return
             }
 
@@ -660,6 +667,14 @@ fun App(
                 rememberedStartupProfile(profileState.profiles)?.let { profile ->
                     ProfileRepository.selectProfile(profile.profileIndex)
                     SyncManager.pullAllForProfile(profile.profileIndex)
+                    gateScreen = AppGateScreen.Main.name
+                    autoSkipProfileSelection = false
+                    return@LaunchedEffect
+                }
+
+                if (profileState.profiles.isEmpty()) {
+                    val default = ProfileRepository.ensureDefaultProfile()
+                    ProfileRepository.selectProfile(default.profileIndex)
                     gateScreen = AppGateScreen.Main.name
                     autoSkipProfileSelection = false
                     return@LaunchedEffect

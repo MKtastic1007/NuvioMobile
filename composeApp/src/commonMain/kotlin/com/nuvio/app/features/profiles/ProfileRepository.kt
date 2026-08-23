@@ -117,6 +117,29 @@ object ProfileRepository {
         _state.value = ProfileState()
     }
 
+    /**
+     * Provide a profile without asking the user for one. Needs neither an account nor
+     * the backend, so startup never blocks on profile creation.
+     */
+    fun ensureDefaultProfile(name: String = "Nuvio"): NuvioProfile {
+        _state.value.profiles.firstOrNull()?.let { return it }
+
+        val profile = NuvioProfile(
+            userId = (AuthRepository.state.value as? AuthState.Authenticated)?.userId.orEmpty(),
+            profileIndex = 1,
+            name = name,
+            avatarColorHex = PROFILE_COLORS.first(),
+        )
+        activeProfileIndex = profile.profileIndex
+        _state.value = _state.value.copy(
+            profiles = listOf(profile),
+            activeProfile = profile,
+            isLoaded = true,
+        )
+        persist()
+        return profile
+    }
+
     suspend fun pullProfiles() {
         if (AuthRepository.state.value.isAnonymous) {
             if (!_state.value.isLoaded) {
@@ -201,6 +224,10 @@ object ProfileRepository {
         } catch (e: Throwable) {
             if (AuthRepository.signOutIfSessionInvalid(e, "Profile push")) return
             log.e(e) { "Failed to push profiles" }
+            // Keep the profile locally instead of dropping it silently: without this a
+            // failed backend call leaves the user staring at an empty profile list right
+            // after they created one.
+            applyPayloadsLocally(profiles)
         }
     }
 
@@ -396,11 +423,11 @@ object ProfileRepository {
     }
 
     private fun applyPayloadsLocally(payloads: List<ProfilePushPayload>) {
-        val authState = AuthRepository.state.value as? AuthState.Authenticated ?: return
+        val localUserId = (AuthRepository.state.value as? AuthState.Authenticated)?.userId.orEmpty()
         val profiles = payloads.map { p ->
             NuvioProfile(
                 id = "",
-                userId = authState.userId,
+                userId = localUserId,
                 profileIndex = p.profileIndex,
                 name = p.name,
                 avatarColorHex = p.avatarColorHex,
